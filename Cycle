@@ -90,7 +90,7 @@ local Phases = {
     {
         name           = "Night",
         clockTime      = 21,
-        brightness     = 0.3,
+        brightness     = 0.6,
         ambient        = Color3.fromRGB(15,  15,  25),   -- very dark blue-black
         outdoorAmbient = Color3.fromRGB(18,  18,  30),
         fogColor       = Color3.fromRGB(8,   8,   15),
