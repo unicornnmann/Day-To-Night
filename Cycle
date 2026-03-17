@@ -1,0 +1,248 @@
+-- DayNightCycle (LocalScript)
+-- Place inside: StarterPlayerScripts or StarterCharacterScripts
+-- Cycles through: Dawn → Morning → Midday → Afternoon → Dusk → Evening → Night → Midnight
+-- All client-side. Smoothly transitions lighting each phase.
+
+local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
+
+-- ============================================================
+--  CONFIGURATION
+-- ============================================================
+
+local CYCLE_DURATION  = 420   -- total seconds for one full day (7 min). Adjust freely.
+local TWEEN_TIME      = 6     -- seconds to blend between phases (transition smoothness)
+
+-- ============================================================
+--  PHASE DEFINITIONS
+--  ClockTime : Roblox lighting hour (0-24)
+--  Brightness, Ambient, OutdoorAmbient, FogColor, FogEnd
+--  SkyboxSun / SkyboxMoon are set via atmosphere if you have one
+-- ============================================================
+
+local Phases = {
+    {
+        name           = "Dawn",
+        clockTime      = 5.5,
+        brightness     = 0.6,
+        ambient        = Color3.fromRGB(60,  50,  70),   -- deep purple-grey
+        outdoorAmbient = Color3.fromRGB(70,  55,  80),
+        fogColor       = Color3.fromRGB(120, 90, 110),
+        fogEnd         = 800,
+        colorShift_Top = Color3.fromRGB(80,  60,  90),
+        colorShift_Bot = Color3.fromRGB(40,  30,  55),
+    },
+    {
+        name           = "Morning",
+        clockTime      = 7,
+        brightness     = 1.2,
+        ambient        = Color3.fromRGB(80,  75,  90),   -- slightly dark, cool blue
+        outdoorAmbient = Color3.fromRGB(90,  85, 100),
+        fogColor       = Color3.fromRGB(160, 150, 180),
+        fogEnd         = 1200,
+        colorShift_Top = Color3.fromRGB(100, 110, 140),
+        colorShift_Bot = Color3.fromRGB(60,  65,  80),
+    },
+    {
+        name           = "Midday",
+        clockTime      = 12,
+        brightness     = 2,
+        ambient        = Color3.fromRGB(130, 130, 130),  -- bright white
+        outdoorAmbient = Color3.fromRGB(140, 140, 140),
+        fogColor       = Color3.fromRGB(200, 210, 220),
+        fogEnd         = 2400,
+        colorShift_Top = Color3.fromRGB(180, 195, 210),
+        colorShift_Bot = Color3.fromRGB(130, 140, 155),
+    },
+    {
+        name           = "Afternoon",
+        clockTime      = 15,
+        brightness     = 1.7,
+        ambient        = Color3.fromRGB(140, 120, 80),   -- slight yellow-warm
+        outdoorAmbient = Color3.fromRGB(150, 130, 85),
+        fogColor       = Color3.fromRGB(210, 190, 150),
+        fogEnd         = 2000,
+        colorShift_Top = Color3.fromRGB(200, 175, 110),
+        colorShift_Bot = Color3.fromRGB(140, 115, 70),
+    },
+    {
+        name           = "Dusk",
+        clockTime      = 17.5,
+        brightness     = 1.1,
+        ambient        = Color3.fromRGB(110, 75,  55),   -- slightly darker orange
+        outdoorAmbient = Color3.fromRGB(120, 80,  60),
+        fogColor       = Color3.fromRGB(160, 100, 70),
+        fogEnd         = 1200,
+        colorShift_Top = Color3.fromRGB(150, 90,  55),
+        colorShift_Bot = Color3.fromRGB(90,  55,  35),
+    },
+    {
+        name           = "Evening",
+        clockTime      = 19,
+        brightness     = 0.9,
+        ambient        = Color3.fromRGB(130, 70,  40),   -- orange glow
+        outdoorAmbient = Color3.fromRGB(140, 75,  45),
+        fogColor       = Color3.fromRGB(170, 100, 60),
+        fogEnd         = 900,
+        colorShift_Top = Color3.fromRGB(160, 85,  40),
+        colorShift_Bot = Color3.fromRGB(80,  40,  20),
+    },
+    {
+        name           = "Night",
+        clockTime      = 21,
+        brightness     = 0.3,
+        ambient        = Color3.fromRGB(15,  15,  25),   -- very dark blue-black
+        outdoorAmbient = Color3.fromRGB(18,  18,  30),
+        fogColor       = Color3.fromRGB(8,   8,   15),
+        fogEnd         = 500,
+        colorShift_Top = Color3.fromRGB(10,  12,  22),
+        colorShift_Bot = Color3.fromRGB(5,   5,   12),
+    },
+    {
+        name           = "Midnight",
+        clockTime      = 0,
+        brightness     = 0.15,
+        ambient        = Color3.fromRGB(20,  10,  35),   -- purple-black
+        outdoorAmbient = Color3.fromRGB(22,  10,  38),
+        fogColor       = Color3.fromRGB(12,  5,   20),
+        fogEnd         = 350,
+        colorShift_Top = Color3.fromRGB(15,  5,   28),
+        colorShift_Bot = Color3.fromRGB(8,   3,   18),
+    },
+}
+
+-- ============================================================
+--  HOW LONG EACH PHASE LASTS
+--  Proportional weights (they don't need to add to any number)
+--  Tune these to make certain phases linger longer.
+-- ============================================================
+
+local PhaseWeights = {
+    Dawn      = 1,   -- brief
+    Morning   = 1.5,
+    Midday    = 2,   -- longest bright window
+    Afternoon = 1.5,
+    Dusk      = 1,
+    Evening   = 1,
+    Night     = 2,   -- long night
+    Midnight  = 1,
+}
+
+-- ============================================================
+--  INTERNAL: compute phase durations from weights
+-- ============================================================
+
+local totalWeight = 0
+for _, p in ipairs(Phases) do
+    totalWeight = totalWeight + (PhaseWeights[p.name] or 1)
+end
+
+local phaseDurations = {}
+for _, p in ipairs(Phases) do
+    phaseDurations[p.name] = CYCLE_DURATION * ((PhaseWeights[p.name] or 1) / totalWeight)
+end
+
+-- ============================================================
+--  APPLY LIGHTING (instant, used at script start)
+-- ============================================================
+
+local function applyLightingInstant(phase)
+    Lighting.ClockTime      = phase.clockTime
+    Lighting.Brightness     = phase.brightness
+    Lighting.Ambient        = phase.ambient
+    Lighting.OutdoorAmbient = phase.outdoorAmbient
+    Lighting.FogColor       = phase.fogColor
+    Lighting.FogEnd         = phase.fogEnd
+    Lighting.ColorShift_Top = phase.colorShift_Top
+    Lighting.ColorShift_Bottom = phase.colorShift_Bot
+end
+
+-- ============================================================
+--  TWEEN LIGHTING (smooth transition)
+-- ============================================================
+
+local function tweenLighting(targetPhase)
+    local tweenInfo = TweenInfo.new(
+        TWEEN_TIME,
+        Enum.EasingStyle.Linear,
+        Enum.EasingDirection.InOut
+    )
+
+    -- ClockTime needs special handling: tween via a NumberValue proxy
+    -- because Lighting.ClockTime is not a TweenService-compatible property directly
+    -- We update it manually in a loop for smooth sky movement.
+
+    local startClock = Lighting.ClockTime
+    local endClock   = targetPhase.clockTime
+
+    -- Handle midnight wrap (e.g. going from 21 → 0)
+    local clockDelta = endClock - startClock
+    if clockDelta > 12 then
+        clockDelta = clockDelta - 24
+    elseif clockDelta < -12 then
+        clockDelta = clockDelta + 24
+    end
+
+    -- Tween all Color3 + number properties
+    local lightingGoal = {
+        Brightness          = targetPhase.brightness,
+        Ambient             = targetPhase.ambient,
+        OutdoorAmbient      = targetPhase.outdoorAmbient,
+        FogColor            = targetPhase.fogColor,
+        FogEnd              = targetPhase.fogEnd,
+        ColorShift_Top      = targetPhase.colorShift_Top,
+        ColorShift_Bottom   = targetPhase.colorShift_Bot,
+    }
+
+    local tween = TweenService:Create(Lighting, tweenInfo, lightingGoal)
+    tween:Play()
+
+    -- Manually lerp ClockTime over TWEEN_TIME seconds
+    local elapsed = 0
+    local connection
+    connection = game:GetService("RunService").Heartbeat:Connect(function(dt)
+        elapsed = elapsed + dt
+        local alpha = math.clamp(elapsed / TWEEN_TIME, 0, 1)
+        local newClock = startClock + clockDelta * alpha
+        -- wrap around 24
+        if newClock < 0 then newClock = newClock + 24 end
+        if newClock >= 24 then newClock = newClock - 24 end
+        Lighting.ClockTime = newClock
+        if alpha >= 1 then
+            connection:Disconnect()
+        end
+    end)
+
+    return tween
+end
+
+-- ============================================================
+--  MAIN CYCLE LOOP
+-- ============================================================
+
+-- Start at Dawn
+local currentPhaseIndex = 1
+applyLightingInstant(Phases[currentPhaseIndex])
+
+print("[DayNightCycle] Started — Phase:", Phases[currentPhaseIndex].name)
+
+while true do
+    local phase = Phases[currentPhaseIndex]
+    local duration = phaseDurations[phase.name]
+
+    -- Wait through this phase (minus tween time so transition overlaps end)
+    local waitTime = math.max(0, duration - TWEEN_TIME)
+    task.wait(waitTime)
+
+    -- Move to next phase
+    currentPhaseIndex = (currentPhaseIndex % #Phases) + 1
+    local nextPhase = Phases[currentPhaseIndex]
+
+    print("[DayNightCycle] Transitioning to:", nextPhase.name)
+
+    -- Start smooth transition
+    local tween = tweenLighting(nextPhase)
+
+    -- Wait for tween to finish before continuing
+    tween.Completed:Wait()
+end
